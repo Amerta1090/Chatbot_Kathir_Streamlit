@@ -1,0 +1,4 @@
+Context: {context}
+Question: {query}
+
+Instruction: Answer in the same language as the question. Use only the information from the context. If not available, write "No information available". Be clear and detailed.
