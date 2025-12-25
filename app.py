@@ -209,7 +209,7 @@ def call_hf_generate(prompt: str):
             model=HF_MODEL,
             messages=[{"role": "user", "content": prompt}],
             # UBAH PARAMETER INI:
-            temperature=0.5,  
+            temperature=0.6,  
             max_tokens=2048,
         )
         return completion.choices[0].message.content
