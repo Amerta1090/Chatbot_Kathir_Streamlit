@@ -22,7 +22,7 @@ PROMPT_PATH = os.path.join(DATA_DIR, "prompt_rag.txt")
 
 # HF Router config
 HF_TOKEN = st.secrets.get("hf_token", None)
-HF_MODEL = "meta-llama/Llama-3.2-3B-Instruct:novita"
+HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct:novita"
 HF_BASE_URL = "https://router.huggingface.co/v1"
 
 # ----------------------------
