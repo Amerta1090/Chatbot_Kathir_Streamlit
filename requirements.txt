@@ -1,8 +1,10 @@
+streamlit==1.31.1
+transformers==4.41.2
+torch==2.2.2
+sentencepiece
+tokenizers
 numpy
-openai
 pandas
 scikit-learn
-streamlit
-torch
-transformers
+openai
 altair==4.2.2
