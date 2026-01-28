@@ -14,7 +14,7 @@ from typing import Dict, Any
 # ----------------------------
 DATA_DIR = "../data"
 BM25_PATH = os.path.join(DATA_DIR, "bm25_model.pkl")
-DENSE_EMB_PATH = os.path.join(DATA_DIR, "dense_embeddings.npy")
+DENSE_EMB_PATH = os.path.join(DATA_DIR, "dense_embeddings_small.npy")
 EMB_INDEX_PATH = os.path.join(DATA_DIR, "embedding_index.csv")
 CLEAN_DATASET_PATH = os.path.join(DATA_DIR, "clean_dataset.csv")
 PROMPT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "prompt_rag.txt")
@@ -91,7 +91,7 @@ def load_resources():
     try:
         dense_embeddings = np.load(DENSE_EMB_PATH)
     except:
-        dense_embeddings = np.zeros((1, 768))
+        dense_embeddings = np.zeros((1, 384))
 
     try:
         embedding_index = pd.read_csv(EMB_INDEX_PATH)
