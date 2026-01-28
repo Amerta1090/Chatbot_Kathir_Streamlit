@@ -1,5 +1,6 @@
 # app_streamlit_extreme.py (versi clean)
 import streamlit as st
+st.set_page_config(page_title="RAG Chat Interface", layout="wide")
 import pandas as pd
 import numpy as np
 import torch
