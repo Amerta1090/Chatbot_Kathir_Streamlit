@@ -1,6 +1,4 @@
-# app_streamlit_extreme.py (versi clean)
 import streamlit as st
-st.set_page_config(page_title="RAG Chat Interface", layout="wide")
 import pandas as pd
 import numpy as np
 import torch
@@ -14,24 +12,26 @@ from typing import Dict, Any
 # ----------------------------
 # CONFIG PATH
 # ----------------------------
-DATA_DIR = "data"
+DATA_DIR = "../data"
 BM25_PATH = os.path.join(DATA_DIR, "bm25_model.pkl")
-DENSE_EMB_PATH = os.path.join(DATA_DIR, "dense_embeddings_small.npy")
+DENSE_EMB_PATH = os.path.join(DATA_DIR, "dense_embeddings.npy")
 EMB_INDEX_PATH = os.path.join(DATA_DIR, "embedding_index.csv")
 CLEAN_DATASET_PATH = os.path.join(DATA_DIR, "clean_dataset.csv")
-PROMPT_PATH = os.path.join(DATA_DIR, "prompt_rag.txt")
+PROMPT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "prompt_rag.txt")
 
-# HF Router config
-HF_TOKEN = st.secrets.get("hf_token", None)
-HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct:novita"
-HF_BASE_URL = "https://router.huggingface.co/v1"
+# ----------------------------
+# OpenRouter LLM config
+# ----------------------------
+OPENROUTER_TOKEN = st.secrets.get("openrouter_api_key", None)
+OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # ----------------------------
 # Surah mapping
 # ----------------------------
 SURAH_NAMES = [
     "Al-Fatihah", "Al-Baqarah", "Ali 'Imran", "An-Nisa'", "Al-Ma'idah", "Al-An'am", "Al-A'raf",
-    "Al-Anfal", "At-Taubah", "Yunus", "Hud", "Yusuf", "Ar-Ra'd", "Ibrahim", "Al-Hijr", "An-Nahl",
+    "Al-Anfal", "At-Tahbah", "Yunus", "Hud", "Yusuf", "Ar-Ra'd", "Ibrahim", "Al-Hijr", "An-Nahl",
     "Al-Isra'", "Al-Kahf", "Maryam", "Ta-Ha", "Al-Anbiya'", "Al-Hajj", "Al-Mu'minun", "An-Nur",
     "Al-Furqan", "Ash-Shu'ara'", "An-Naml", "Al-Qasas", "Al-Ankabut", "Ar-Rum", "Luqman", "As-Sajdah",
     "Al-Ahzab", "Saba'", "Fatir", "Ya-Sin", "As-Saffat", "Sad", "Az-Zumar", "Ghafir (Al-Mu'min)",
@@ -47,8 +47,8 @@ SURAH_NAMES = [
     "Quraysh", "Al-Ma'un", "Al-Kawthar", "Al-Kafirun", "An-Nasr", "Al-Masad", "Al-Ikhlas",
     "Al-Falaq", "An-Nas"
 ]
-SURAH_MAP = {i + 1: SURAH_NAMES[i] for i in range(len(SURAH_NAMES))}
-NAME_TO_NUM = {v: k for k, v in SURAH_MAP.items()}
+SURAH_OPTIONS = ["Semua Surah"] + SURAH_NAMES
+NAME_TO_NUM = {name: i + 1 for i, name in enumerate(SURAH_NAMES)}
 
 # ----------------------------
 # Utility functions
@@ -59,22 +59,22 @@ def simple_tokenizer(text: str):
 def mean_pooling(model_output, attention_mask):
     token_embeddings = model_output[0]
     input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+        input_mask_expanded.sum(1), min=1e-9
+    )
 
 def min_max_normalize(series: pd.Series) -> pd.Series:
-    min_val = series.min()
-    max_val = series.max()
-    if max_val == min_val:
-        return pd.Series([0.0]*len(series), index=series.index)
-    return (series - min_val) / (max_val - min_val)
+    if series.empty or series.max() == series.min():
+        return pd.Series([0.0] * len(series), index=series.index)
+    return (series - series.min()) / (series.max() - series.min())
 
 def get_document_text(doc_id, df):
     try:
         i = int(doc_id)
+        if 0 <= i < len(df):
+            return df.iloc[i].get("text", "")
     except:
-        return ""
-    if 0 <= i < len(df):
-        return df.iloc[i].get('text', "")
+        pass
     return ""
 
 # ----------------------------
@@ -82,20 +82,17 @@ def get_document_text(doc_id, df):
 # ----------------------------
 @st.cache_resource(show_spinner=True)
 def load_resources():
-    # BM25
     try:
-        with open(BM25_PATH, 'rb') as f:
+        with open(BM25_PATH, "rb") as f:
             bm25_model = pickle.load(f)
     except:
         bm25_model = None
 
-    # Dense embeddings
     try:
         dense_embeddings = np.load(DENSE_EMB_PATH)
     except:
-        dense_embeddings = np.zeros((1, 384))
+        dense_embeddings = np.zeros((1, 768))
 
-    # Index & documents
     try:
         embedding_index = pd.read_csv(EMB_INDEX_PATH)
     except:
@@ -106,10 +103,9 @@ def load_resources():
     except:
         full_document_texts_df = pd.DataFrame()
 
-    # Multilingual E5
     try:
-        tokenizer = AutoTokenizer.from_pretrained("intfloat/multilingual-e5-small")
-        model = AutoModel.from_pretrained("intfloat/multilingual-e5-small")
+        tokenizer = AutoTokenizer.from_pretrained("intfloat/multilingual-e5-large")
+        model = AutoModel.from_pretrained("intfloat/multilingual-e5-large")
         model.eval()
     except:
         tokenizer, model = None, None
@@ -119,222 +115,155 @@ def load_resources():
 bm25_model, dense_embeddings, embedding_index, full_document_texts_df, tokenizer, model = load_resources()
 
 # ----------------------------
-# Hybrid search — filter before retrieval
+# Hybrid search with Metadata Filtering
 # ----------------------------
-def hybrid_search(query: str, filters: Dict[str, Any]=None, k: int=1) -> pd.DataFrame:
+def hybrid_search(query: str, filters: Dict[str, Any] = None, k: int = 1) -> pd.DataFrame:
     # 1. Tentukan subset dokumen berdasarkan filter
     df_filtered = full_document_texts_df.copy()
     if filters:
-        if 'sura' in filters and filters['sura']:
-            df_filtered = df_filtered[df_filtered['sura'] == filters['sura']]
-        if 'ayah' in filters and filters['ayah']:
+        if filters.get("sura"):
+            df_filtered = df_filtered[df_filtered["sura"] == filters["sura"]]
+        if filters.get("ayah"):
             df_filtered = df_filtered[
-                (df_filtered['tafsir_ayah_start'] <= filters['ayah']) &
-                (df_filtered['tafsir_ayah_end'] >= filters['ayah'])
+                (df_filtered["tafsir_ayah_start"] <= filters["ayah"]) &
+                (df_filtered["tafsir_ayah_end"] >= filters["ayah"])
             ]
+    
+    # Jika hasil filter kosong, fallback ke semua (atau beri peringatan)
     if df_filtered.empty:
-        # fallback: gunakan seluruh dataset
         df_filtered = full_document_texts_df.copy()
+    
     df_indices = df_filtered.index.to_numpy()
 
-    # 2. BM25
+    # 2. BM25 Search pada subset
     if bm25_model:
         tokenized_q = simple_tokenizer(query)
         bm25_scores_all = bm25_model.get_scores(tokenized_q)
-        bm25_scores = bm25_scores_all[df_indices]  # subset
+        bm25_scores = bm25_scores_all[df_indices]
     else:
         bm25_scores = np.zeros(len(df_indices))
 
     top_sparse_idx = np.argsort(bm25_scores)[::-1][:k]
-    top_sparse_doc_ids = df_indices[top_sparse_idx]
-    sparse_df = pd.DataFrame([
-        {"doc_id": int(doc_id), "bm25_score": float(bm25_scores[i])}
-        for i, doc_id in enumerate(top_sparse_doc_ids)
-    ])
+    sparse_df = pd.DataFrame({
+        "doc_id": df_indices[top_sparse_idx].astype(int),
+        "bm25_score": bm25_scores[top_sparse_idx].astype(float)
+    })
 
-    # 3. Dense embeddings
+    # 3. Dense Search pada subset
     if tokenizer and model and len(df_indices) > 0:
         q_inputs = tokenizer(query, padding=True, truncation=True, return_tensors="pt")
         with torch.no_grad():
             q_out = model(**q_inputs)
             q_emb = mean_pooling(q_out, q_inputs['attention_mask'])
         q_emb_np = q_emb.cpu().numpy()
-        dense_scores_all = cosine_similarity(q_emb_np, dense_embeddings[df_indices])[0]
+        dense_scores_subset = cosine_similarity(q_emb_np, dense_embeddings[df_indices])[0]
     else:
-        dense_scores_all = np.zeros(len(df_indices)) if len(df_indices) > 0 else np.array([])
+        dense_scores_subset = np.zeros(len(df_indices))
 
-    top_dense_idx = np.argsort(dense_scores_all)[::-1][:k]
-    top_dense_doc_ids = df_indices[top_dense_idx]
-    dense_df = pd.DataFrame([
-        {"doc_id": int(doc_id), "dense_score": float(dense_scores_all[i])}
-        for i, doc_id in enumerate(top_dense_doc_ids)
-    ])
+    top_dense_idx = np.argsort(dense_scores_subset)[::-1][:k]
+    dense_df = pd.DataFrame({
+        "doc_id": df_indices[top_dense_idx].astype(int),
+        "dense_score": dense_scores_subset[top_dense_idx].astype(float)
+    })
 
-    # 4. Merge BM25 & dense, normalize, fused score
-    merged = pd.merge(sparse_df, dense_df, on='doc_id', how='outer').fillna(0.0)
-    merged['normalized_bm25_score'] = min_max_normalize(merged['bm25_score'])
-    merged['normalized_dense_score'] = min_max_normalize(merged['dense_score'])
-    merged['fused_score'] = 0.5 * merged['normalized_dense_score'] + 0.5 * merged['normalized_bm25_score']
-    merged = merged.sort_values('fused_score', ascending=False).head(k)
+    # 4. Merge, Normalize, and Fuse
+    merged = pd.merge(sparse_df, dense_df, on="doc_id", how="outer").fillna(0.0)
+    merged["normalized_bm25_score"] = min_max_normalize(merged["bm25_score"])
+    merged["normalized_dense_score"] = min_max_normalize(merged["dense_score"])
+    merged["fused_score"] = 0.5 * merged["normalized_bm25_score"] + 0.5 * merged["normalized_dense_score"]
 
-    # 5. Merge dengan embedding_index (metadata)
+    # 5. Join dengan metadata jika tersedia
     right_key = 'id' if 'id' in embedding_index.columns else 'doc_id'
     if not embedding_index.empty:
         merged = pd.merge(merged, embedding_index, left_on='doc_id', right_on=right_key, how='inner')
 
-    # 6. Ambil document_text
-    merged['document_text'] = merged['doc_id'].apply(lambda x: get_document_text(x, full_document_texts_df))
-
-    return merged.sort_values('fused_score', ascending=False)
-
-
+    # 6. Ambil teks dokumen
+    merged["document_text"] = merged["doc_id"].apply(lambda x: get_document_text(x, full_document_texts_df))
+    
+    return merged.sort_values("fused_score", ascending=False).head(k)
 
 # ----------------------------
-# HF client
+# LLM Logic
 # ----------------------------
-def init_hf_client():
-    if HF_TOKEN is None:
-        return None
-    try:
-        return OpenAI(base_url=HF_BASE_URL, api_key=HF_TOKEN)
-    except:
-        return None
+def init_llm_client():
+    if not OPENROUTER_TOKEN: return None
+    return OpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_TOKEN)
 
-hf_client = init_hf_client()
+llm_client = init_llm_client()
 
-def call_hf_generate(prompt: str):
-    if hf_client is None:
-        return "Error: HF client tidak terinisialisasi."
+def call_llm_generate(prompt: str) -> str:
+    if not llm_client: return "Error: API Key tidak ditemukan."
     try:
-        completion = hf_client.chat.completions.create(
-            model=HF_MODEL,
+        completion = llm_client.chat.completions.create(
+            model=OPENROUTER_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            # UBAH PARAMETER INI:
-            temperature=0.6,  
-            max_tokens=2048,
+            temperature=0.3,
+            max_tokens=1024,
         )
         return completion.choices[0].message.content
     except Exception as e:
         return f"Error: {e}"
-# ----------------------------
-# Generate answer
-# ----------------------------
-def generate_answer(query: str, filters: Dict[str, Any]=None):
-    context_df = hybrid_search(query, filters=filters, k=1)
-    context_pieces = []
-    for i, row in context_df.iterrows():
-        snippet = str(row.get('document_text', ""))[:800].replace("\n", " ")
-        context_pieces.append(f"[{i+1}] {snippet}")
-    context_text = "\n\n".join(context_pieces) if context_pieces else "Tidak ada konteks tersedia."
+
+def generate_answer(query: str, filters: Dict[str, Any] = None):
+    ctx_df = hybrid_search(query, filters=filters, k=1)
+    
+    if not ctx_df.empty:
+        context = ctx_df.iloc[0]["document_text"]
+        # Jika filter aktif, beri tahu LLM Surah/Ayah mana ini
+        meta_info = f" (Surah: {ctx_df.iloc[0].get('sura', '')}, Ayah: {ctx_df.iloc[0].get('tafsir_ayah_start', '')})"
+    else:
+        context = "Tidak ada konteks ditemukan."
+        meta_info = ""
 
     if os.path.exists(PROMPT_PATH):
-        with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-            prompt_template = f.read()
+        prompt_template = open(PROMPT_PATH, encoding="utf-8").read()
     else:
-        prompt_template =  (
-		'''
-		Context: {context}
-		Question: {query}
+        prompt_template = (
+            "Konteks Tafsir:\n{context}\n\n"
+            "Pertanyaan:\n{query}\n\n"
+            "Instruksi:\nJawablah dengan bahasa Indonesia yang baik hanya berdasarkan konteks di atas."
+        )
 
-		Instruction: Answer in the same language as the question. Use only the information from the context. If not available, write "No information available". Be clear and detailed.
-
-		'''
-		)
-
-    prompt = prompt_template.format(context=context_text, query=query)
-    answer = call_hf_generate(prompt)
-    return answer, context_df
+    prompt = prompt_template.format(context=context, query=query)
+    answer = call_llm_generate(prompt)
+    return answer, ctx_df
 
 # ----------------------------
-# UI State
+# UI STREAMLIT
 # ----------------------------
-if "filter_open" not in st.session_state:
-    st.session_state.filter_open = False
+st.set_page_config(page_title="RAG Tafsir Ibn Kathir", layout="wide")
+
+# SIDEBAR FILTER
+st.sidebar.header("Filter Pencarian")
+selected_surah_name = st.sidebar.selectbox("Pilih Surah", SURAH_OPTIONS)
+selected_ayah = st.sidebar.number_input("Nomor Ayah (0 untuk semua)", min_value=0, step=1, value=0)
+
+active_filters = {}
+if selected_surah_name != "Semua Surah":
+    active_filters["sura"] = NAME_TO_NUM[selected_surah_name]
+if selected_ayah > 0:
+    active_filters["ayah"] = selected_ayah
+
+st.title("📖 RAG — Tafsir Ibn Kathir")
+st.caption(f"Status Filter: **{selected_surah_name}** | Ayah: **{selected_ayah if selected_ayah > 0 else 'Semua'}**")
+
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# ----------------------------
-# CSS
-# ----------------------------
-st.markdown("""
-<style>
-.stChatMessage { padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; }
-.assistant-bubble { background: linear-gradient(90deg, rgba(22,8,56,0.65), rgba(30,12,60,0.6)); border-left: 3px solid #8a63ff; }
-.user-bubble { background: rgba(255,255,255,0.03); border-left: 3px solid #17bebb; }
-</style>
-""", unsafe_allow_html=True)
+# Layout Chat
+query = st.chat_input("Tanyakan tafsir (contoh: 'Apa kandungan utama ayat ini?')...")
 
-# ----------------------------
-# Top bar + filter
-# ----------------------------
-col1, col2 = st.columns([8, 2])
-with col1:
-    st.title("RAG — Tafsir Ibn Kathir Assistant")
-with col2:
-    if st.button("Filter", key="toggle_filter"):
-        st.session_state.filter_open = not st.session_state.filter_open
+if query:
+    st.session_state.chat_history.append(("user", query, None))
+    with st.spinner("Mencari di kitab tafsir..."):
+        answer, ctx_df = generate_answer(query, filters=active_filters)
+    st.session_state.chat_history.append(("assistant", answer, ctx_df))
 
-if st.session_state.filter_open:
-    with st.expander("Filter — Surah & Ayah", expanded=True):
-        surah_name_selected = st.selectbox("Pilih Surah (nama)", ["Semua"] + SURAH_NAMES, index=0)
-        selected_sura = NAME_TO_NUM.get(surah_name_selected) if surah_name_selected != "Semua" else None
-        ayah_input = st.text_input("Nomor Ayah (opsional)", value="")
-        selected_ayah = int(ayah_input) if ayah_input.isdigit() else None
-else:
-    selected_sura = None
-    selected_ayah = None
-
-# ----------------------------
-# Chat columns
-# ----------------------------
-if "awaiting_answer" not in st.session_state:
-    st.session_state.awaiting_answer = False
-    st.session_state.last_query = ""
-
-left_col, right_col = st.columns([3,1])
-with left_col:
-    # Render chat
-    for idx, (role, text, ctx_df) in enumerate(st.session_state.chat_history):
-        if role == "user":
-            st.markdown(
-                f"<div class='stChatMessage user-bubble'><b>You</b><div>{text}</div></div>", 
-                unsafe_allow_html=True
-            )
-        else:
-            st.markdown(
-                f"<div class='stChatMessage assistant-bubble'><b>Assistant</b><div>{text}</div></div>", 
-                unsafe_allow_html=True
-            )
-            if ctx_df is not None and not ctx_df.empty:
-                with st.expander("Lihat konteks sumber (klik untuk buka)", expanded=False):
-                    cols_to_show = [c for c in ['document_text'] if c in ctx_df.columns]
-                    st.dataframe(ctx_df[cols_to_show].head(10))
-
-    # Chat input
-    user_query = st.chat_input("Tanyakan tentang tafsir — gunakan bahasa Indonesia atau campuran")
-    if user_query:
-        st.session_state.chat_history.append(("user", user_query, None))
-        st.session_state.last_query = user_query
-        st.session_state.awaiting_answer = True
-
-# Generate assistant answer if flagged
-if st.session_state.awaiting_answer:
-    filters = {"sura": selected_sura, "ayah": selected_ayah}
-    with st.spinner("Mencari dan menghasilkan jawaban..."):
-        answer, ctx_df = generate_answer(st.session_state.last_query, filters=filters)
-        st.session_state.chat_history.append(("assistant", answer, ctx_df))
-    st.session_state.awaiting_answer = False
-    st.rerun()
-    # No need for experimental_rerun; Streamlit auto reruns after input
-
-
-with right_col:
-    st.header("Controls")
-    if st.button("Clear chat"):
-        st.session_state.chat_history = []
-    st.write("Filter state:", "Open" if st.session_state.filter_open else "Closed")
-    st.write("Selected surah:", SURAH_MAP.get(selected_sura, "Semua"))
-    st.write("Selected ayah:", selected_ayah if selected_ayah else "Semua")
-
-st.markdown("---")
-st.markdown("Antarmuka ini memprioritaskan percakapan. Jika Anda ingin melihat konteks sumber, buka expander pada jawaban assistant.")
+# Tampilkan Chat
+for role, text, ctx_df in st.session_state.chat_history:
+    with st.chat_message(role):
+        st.write(text)
+        if role == "assistant" and ctx_df is not None and not ctx_df.empty:
+            with st.expander("📚 Sumber Konteks"):
+                st.write(f"**Surah {ctx_df.iloc[0].get('sura')} | Ayah {ctx_df.iloc[0].get('tafsir_ayah_start')}**")
+                st.write(ctx_df.iloc[0]["document_text"])
