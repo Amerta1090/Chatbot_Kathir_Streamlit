@@ -107,8 +107,8 @@ def load_resources():
 
     # Multilingual E5
     try:
-        tokenizer = AutoTokenizer.from_pretrained("intfloat/multilingual-e5-large")
-        model = AutoModel.from_pretrained("intfloat/multilingual-e5-large")
+		tokenizer = AutoTokenizer.from_pretrained("intfloat/multilingual-e5-small")
+		model = AutoModel.from_pretrained("intfloat/multilingual-e5-small")
         model.eval()
     except:
         tokenizer, model = None, None
