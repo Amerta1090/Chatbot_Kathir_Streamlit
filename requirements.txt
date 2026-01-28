@@ -5,3 +5,4 @@ scikit-learn
 streamlit
 torch
 transformers
+altair
