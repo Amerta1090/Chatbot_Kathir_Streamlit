@@ -153,7 +153,7 @@ def hybrid_search(query: str, filters: Dict[str, Any]=None, k: int=1) -> pd.Data
     ])
 
     # 3. Dense embeddings
-    if tokenizer and model:
+    if tokenizer and model and len(df_indices) > 0:
         q_inputs = tokenizer(query, padding=True, truncation=True, return_tensors="pt")
         with torch.no_grad():
             q_out = model(**q_inputs)
@@ -161,7 +161,7 @@ def hybrid_search(query: str, filters: Dict[str, Any]=None, k: int=1) -> pd.Data
         q_emb_np = q_emb.cpu().numpy()
         dense_scores_all = cosine_similarity(q_emb_np, dense_embeddings[df_indices])[0]
     else:
-        dense_scores_all = np.zeros(len(df_indices))
+        dense_scores_all = np.zeros(len(df_indices)) if len(df_indices) > 0 else np.array([])
 
     top_dense_idx = np.argsort(dense_scores_all)[::-1][:k]
     top_dense_doc_ids = df_indices[top_dense_idx]
