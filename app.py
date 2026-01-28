@@ -256,7 +256,6 @@ if "chat_history" not in st.session_state:
 # ----------------------------
 # CSS
 # ----------------------------
-st.set_page_config(page_title="RAG Chat Interface", layout="wide")
 st.markdown("""
 <style>
 .stChatMessage { padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; }
