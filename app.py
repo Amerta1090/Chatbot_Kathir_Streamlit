@@ -109,7 +109,7 @@ def load_resources():
     try:
 		tokenizer = AutoTokenizer.from_pretrained("intfloat/multilingual-e5-small")
 		model = AutoModel.from_pretrained("intfloat/multilingual-e5-small")
-        model.eval()
+		model.eval()
     except:
         tokenizer, model = None, None
 
